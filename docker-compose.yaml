@@ -1,0 +1,66 @@
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0.5
+    container_name: keycloak
+    environment:
+      # Database configuration
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: password # !! CHANGE THIS IN PRODUCTION (use secrets) !!
+      KC_DB_SCHEMA: public
+
+      # Keycloak Server Configuration for Proxy
+      KC_HOSTNAME_URL: https://keycloak-sefaz-staging.flemis.cloud/ # Must match the public hostname for the tunnel
+      KC_HOSTNAME_ADMIN_URL: https://keycloak-sefaz-staging.flemis.cloud/
+      KC_HOSTNAME_PORT: 443 # Port seen by the client (Cloudflare handles HTTPS)
+      KC_HOSTNAME_STRICT_HTTPS: "true" # Essential when behind a proxy like Cloudflare
+      KC_PROXY: "edge" # Tells Keycloak it's behind a proxy at the edge of the network
+
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "true"
+      KC_HTTP_ENABLED: "false" # Keycloak will only listen on HTTP internally, but external traffic is HTTPS
+      KC_HTTPS_PORT: 8443 # Keycloak's internal HTTPS port (not externally exposed)
+      KC_HTTP_PORT: 8080 # Keycloak's internal HTTP port (exposed to tunnel)
+
+      # Admin User (initial setup only)
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin_password # !! CHANGE THIS IN PRODUCTION (use secrets) !!
+
+      # Features to enable
+      KC_FEATURES: "token-exchange,admin-fine-grained-authz"
+
+      # Production mode (Recommended for staging/production)
+      KC_PRODUCTION: "true" # Activates production defaults
+    command:
+      - start # Use 'start' for production. This requires a pre-built Keycloak image or running 'kc.sh build' in Dockerfile
+
+  keycloak-db:
+    image: postgres:16-alpine # Using a specific, lightweight version
+    container_name: keycloak-db
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: password # !! CHANGE THIS IN PRODUCTION !!
+    volumes:
+      - pg_data:/var/lib/postgresql/data # Persistent storage for PostgreSQL data
+    healthcheck: # Healthcheck for Keycloak to wait on
+      test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  cloudflared-tunnel:
+    image: cloudflare/cloudflared:latest # Using 'latest' is okay here as it's just the tunnel client
+    container_name: cloudflared-tunnel
+    restart: unless-stopped # Always restart unless explicitly stopped
+    command:
+      - tunnel
+      - --no-autoupdate # Use this if you manage updates manually
+      - run
+      - --token # This flag expects the token in the next argument
+      - eyJhIjoiMjhkNDcyMjQyMjQxMzU3YTI1YWNmZDlmNzgzZmVmYmMiLCJ0IjoiNWU5YzZlNDItOTdmNS00ZGMzLThkMDQtZmI1Njg5YmRjOTI4IiwicyI6Ik4yTTNZbVZoTXprdE0yRTVOQzAwWldVeExUZ3pZalF0Tm1NeE56YzFNR1EyT1RJMCJ9
+volumes:
+  keycloak_data:
+  pg_data:
